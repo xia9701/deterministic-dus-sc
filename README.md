@@ -1,4 +1,4 @@
-This repository provides the open-source evaluation code for our work on deterministic stochastic computing (SC) using Deterministic Unary Sequences (DUS), with a focus on memory-centric and in-DRAM SC architectures.
+This repository provides the open-source evaluation code for our work on deterministic stochastic computing (SC) using Deterministic Unary Sequences (DUS), with a focus on in-memeory SC architectures.
 
 The code covers bitstream-level, operator-level, and task-level evaluations, and compares DUS against conventional stochastic and low-discrepancy baselines.
 
