@@ -1,6 +1,6 @@
-This repository provides the open-source evaluation code for our work on deterministic stochastic computing (SC) using Deterministic Unary Sequences (DUS), with a focus on in-memeory SC architectures.
+This repository provides open-source evaluation code for our work on deterministic stochastic computing (SC) based on Deterministic Unary Sequences (DUS), and is designed to be applicable to in-DRAM SC architectures.
+The code covers bitstream-, operator-, and task-level evaluations, and compares DUS (including ADUS and SDUS) against conventional stochastic generators (e.g., LFSR), low-discrepancy sequences (Sobol and Halton), and representative recent unary computing approaches.
 
-The code covers bitstream-level, operator-level, and task-level evaluations, and compares DUS against conventional stochastic and low-discrepancy baselines.
 
 deterministic-dus-sc/
 ├── b2s_error/             # Binary-to-stochastic (B2S) conversion error
