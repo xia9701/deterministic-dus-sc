@@ -1,126 +1,215 @@
-# run_b2s_sweep.py
-# Sweep N and plot mean B2S error for different methods.
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
-from __future__ import annotations
+"""
+Sweep over lengthN = [16, 32, 64, 128, 256, 512, 1024]
+Auto-select bit width = log2(lengthN),
+Compute average B2S errors,
+Plot error vs. lengthN for all methods.
+"""
 
 import random
-from typing import Dict, List
-
 import numpy as np
 import matplotlib.pyplot as plt
 
-from utils import bits_from_lengthN, generate_random_nbit_nonzero, binary_to_decimal
-from metrics import b2s_error_from_stream
-from dus import make_adus, make_sdus, stream_from_thresholds as dus_stream, get_default_a
+from utils import bits_from_lengthN, generate_random_nbit, binary_to_decimal
+from dus import generate_deterministic_uniform_sequence
 from baselines import (
-    random_bitstream,
-    halton_thresholds,
-    sobol_thresholds,
-    stream_from_thresholds,
-    lfsr_thresholds_auto,
-    lfsr_bitstream,
-    umul_stream_sequentialA,
+    binary_to_random_bitstream,
+    generate_threshold_stream,
+    gen_halton_thresholds_pair,
+    gen_sobol_thresholds_pair,
+    generate_lfsr_sequence_mbit,
+    generate_bitstream_LFSR_mbit,
 )
+from metrics import calc_b2s_error
 
 
-def simulate_b2s_avg(simulations: int, lengthN: int) -> Dict[str, float]:
-    """
-    - BIT_WIDTH = log2(N)
-    - MAX_INT_FOR_BITS = 2^BIT_WIDTH - 1
-    - Per trial: new Halton/Sobol engines and thresholds
-    - Random baseline: per-bit fresh random n-bit threshold
-    - LFSR: auto taps + sr%N mapping
-    - uMUL: mask stream = A_S1, thresholds = S2
-    - Error: mean of A/B errors, each uses ones/(N-1)
-    """
-    bit_width = bits_from_lengthN(lengthN)
-    max_int = (1 << bit_width) - 1
+def simulate_b2s_avg(simulations=10000, lengthN=1024):
+    BIT_WIDTH = bits_from_lengthN(lengthN)
+    MAX_INT_FOR_BITS = (1 << BIT_WIDTH) - 1
 
-    a = get_default_a(lengthN)
-    adus = make_adus(lengthN)
-    sdus = make_sdus(lengthN, a)
+    # DUS params
+    a_dict = {16: 7, 32: 19, 64: 41, 128: 83, 256: 157, 512: 323, 1024: 629}
+    a = a_dict[lengthN]
+    ADUS = list(range(lengthN))
+    proposed = generate_deterministic_uniform_sequence(lengthN, a)
 
-    methods = ["Random", "LFSR", "Halton", "Sobol", "uMUL", "DUS"]
+    methods = ['Random', 'LFSR', 'Halton', 'Sobol', 'DUS']
     error_sum = {m: 0.0 for m in methods}
 
+    bit_width = bits_from_lengthN(lengthN)
+
     for _ in range(simulations):
-        # Threshold arrays (per trial)
-        H1, H2 = halton_thresholds(lengthN)
-        S1, S2 = sobol_thresholds(lengthN)
+        # - Halton/Sobol engine created inside each simulation.
+        H1, H2 = gen_halton_thresholds_pair(lengthN)
+        S1, S2 = gen_sobol_thresholds_pair(lengthN)
 
-        # Random n-bit inputs
-        bA = generate_random_nbit_nonzero(bit_width)
-        bB = generate_random_nbit_nonzero(bit_width)
-        A = binary_to_decimal(bA) / float(max_int)
-        B = binary_to_decimal(bB) / float(max_int)
+        # Binary inputs (use BIT_WIDTH bits, excluding all-zero)
+        binary_numberA = generate_random_nbit(BIT_WIDTH)
+        binary_numberB = generate_random_nbit(BIT_WIDTH)
+        decimal_numberA = binary_to_decimal(binary_numberA)
+        decimal_numberB = binary_to_decimal(binary_numberB)
+        NumberA = decimal_numberA / MAX_INT_FOR_BITS
+        NumberB = decimal_numberB / MAX_INT_FOR_BITS
 
-        # Streams
-        A_rand = random_bitstream(bA, lengthN, bit_width)
-        B_rand = random_bitstream(bB, lengthN, bit_width)
+        # Random streams
+        StreamA_random = binary_to_random_bitstream(binary_numberA, lengthN, BIT_WIDTH)
+        StreamB_random = binary_to_random_bitstream(binary_numberB, lengthN, BIT_WIDTH)
 
-        lfsr_A = lfsr_thresholds_auto(seed=0b10100101, lengthN=lengthN)
-        lfsr_B = lfsr_thresholds_auto(seed=0b01010100, lengthN=lengthN)
-        A_lfsr = lfsr_bitstream(bA, lfsr_A, lengthN, max_int)
-        B_lfsr = lfsr_bitstream(bB, lfsr_B, lengthN, max_int)
+        # - rA/rB generated inside each simulation.
+        rA = generate_lfsr_sequence_mbit(seed=0b10100101, bit_width=bit_width, lengthN=lengthN)
+        rB = generate_lfsr_sequence_mbit(seed=0b01010100, bit_width=bit_width, lengthN=lengthN)
+        streamA_LFSR = generate_bitstream_LFSR_mbit(binary_numberA, rA)
+        streamB_LFSR = generate_bitstream_LFSR_mbit(binary_numberB, rB)
 
-        A_hal = stream_from_thresholds(bA, H1, lengthN, max_int)
-        B_hal = stream_from_thresholds(bB, H2, lengthN, max_int)
+        # Threshold streams
+        streamA_H1 = generate_threshold_stream(binary_numberA, H1, lengthN, MAX_INT_FOR_BITS)
+        streamB_H2 = generate_threshold_stream(binary_numberB, H2, lengthN, MAX_INT_FOR_BITS)
+        streamA_S1 = generate_threshold_stream(binary_numberA, S1, lengthN, MAX_INT_FOR_BITS)
+        streamB_S2 = generate_threshold_stream(binary_numberB, S2, lengthN, MAX_INT_FOR_BITS)
+        streamA_ADUS = generate_threshold_stream(binary_numberA, ADUS, lengthN, MAX_INT_FOR_BITS)
+        streamB_P2 = generate_threshold_stream(binary_numberB, proposed, lengthN, MAX_INT_FOR_BITS)
 
-        A_sob = stream_from_thresholds(bA, S1, lengthN, max_int)
-        B_sob = stream_from_thresholds(bB, S2, lengthN, max_int)
-
-        A_adus = dus_stream(bA, adus, lengthN, max_int)
-        B_sdus = dus_stream(bB, sdus, lengthN, max_int)
-
-        B_umul = umul_stream_sequentialA(bB, S2, A_sob, lengthN, max_int)
-
-        # B2S error (mean of A and B)
         e = {
-            "Random": (b2s_error_from_stream(A_rand, A, lengthN) + b2s_error_from_stream(B_rand, B, lengthN)) / 2,
-            "LFSR":   (b2s_error_from_stream(A_lfsr, A, lengthN) + b2s_error_from_stream(B_lfsr, B, lengthN)) / 2,
-            "Halton": (b2s_error_from_stream(A_hal, A, lengthN) + b2s_error_from_stream(B_hal, B, lengthN)) / 2,
-            "Sobol":  (b2s_error_from_stream(A_sob, A, lengthN) + b2s_error_from_stream(B_sob, B, lengthN)) / 2,
-            "uMUL":   (b2s_error_from_stream(A_sob, A, lengthN) + b2s_error_from_stream(B_umul, B, lengthN)) / 2,
-            "DUS":    (b2s_error_from_stream(A_adus, A, lengthN) + b2s_error_from_stream(B_sdus, B, lengthN)) / 2,
+            'Random': (calc_b2s_error(StreamA_random, NumberA, lengthN) + calc_b2s_error(StreamB_random, NumberB, lengthN)) / 2,
+            'LFSR':   (calc_b2s_error(streamA_LFSR, NumberA, lengthN)   + calc_b2s_error(streamB_LFSR, NumberB, lengthN)) / 2,
+            'Halton': (calc_b2s_error(streamA_H1, NumberA, lengthN)     + calc_b2s_error(streamB_H2, NumberB, lengthN)) / 2,
+            'Sobol':  (calc_b2s_error(streamA_S1, NumberA, lengthN)     + calc_b2s_error(streamB_S2, NumberB, lengthN)) / 2,
+            'DUS':    (calc_b2s_error(streamA_ADUS, NumberA, lengthN)   + calc_b2s_error(streamB_P2, NumberB, lengthN)) / 2,
         }
 
-        for m in e:
+        for m in methods:
             error_sum[m] += e[m]
 
-    return {m: error_sum[m] / simulations for m in error_sum}
+    return {m: error_sum[m] / simulations for m in methods}
 
 
-def main() -> None:
-    # Optional: seeds improve reproducibility for Random baseline.
-    random.seed(0)
-    np.random.seed(0)
+def plot_b2s_errors(errors_dict, save_path="B2S_error.pdf"):
+    # ================== Plot style (TCAS-I) ==================
+    import matplotlib as mpl
 
-    length_list = [16, 32, 64, 128, 256, 512, 1024]
-    methods = ["Random", "LFSR", "Halton", "Sobol", "uMUL", "DUS"]
-    errors = {m: [] for m in methods}
+    FONT = "Times New Roman"
+    BASE_FONTSIZE = 8
+    LABEL_FONTSIZE = 9
+    BORDER_WIDTH = 0.8
+    LINEWIDTH = 1.0
+    MARKERSIZE = 5
+    TICK_LENGTH = 2.5
+    TICK_WIDTH = 0.7
 
-    simulations = 1000  # adjust as needed
+    mpl.rcParams.update({
+        "font.family": FONT,
+        "font.serif": [FONT],
+        "font.sans-serif": [FONT],
+        "font.size": BASE_FONTSIZE,
+        "axes.labelsize": LABEL_FONTSIZE,
+        "xtick.labelsize": BASE_FONTSIZE,
+        "ytick.labelsize": BASE_FONTSIZE,
+        "legend.fontsize": BASE_FONTSIZE,
+        "mathtext.fontset": "cm",
+        "axes.unicode_minus": False,
 
-    for N in length_list:
-        res = simulate_b2s_avg(simulations=simulations, lengthN=N)
-        for m in methods:
-            errors[m].append(res[m])
-        print(f"lengthN={N}  " + "  ".join([f"{m}={res[m]:.6f}" for m in methods]))
+        "font.weight": "bold",
+        "axes.labelweight": "bold",
+        "axes.titleweight": "bold",
+    })
 
-    # Plot
-    plt.figure(figsize=(8, 5))
-    markers = ["o", "x", "^", "s", "D", "v"]
-    for m, mk in zip(methods, markers):
-        plt.plot(length_list, errors[m], marker=mk, label=m)
+    # ====== unified palette (same as MAE figure) ======
+    C1 = "#22BDD2"
+    C3 = "#1B78B2"
+    C5 = "#9368AB"
+    C7 = "#F47F1E"
+    C9 = "#2DA248"
 
-    plt.xscale("log", base=2)
-    plt.xlabel("lengthN (bitstream length)")
-    plt.ylabel("B2S Error (mean of A & B)")
-    plt.title("B2S Error vs Bitstream Length")
-    plt.grid(True, which="both", ls="--", alpha=0.4)
-    plt.legend()
-    plt.tight_layout()
+    COLOR_LFSR = C1
+    COLOR_RANDOM = C3
+    COLOR_HALTON = C7
+    COLOR_SOBOL = C9
+    COLOR_DUS = C5
+
+    # ================== X axis: n_list (equal spacing) ==================
+    n_list = np.array([4, 5, 6, 7, 8, 9, 10])
+
+    methods = ['Random', 'LFSR', 'Halton', 'Sobol', 'DUS']
+
+    fig, ax = plt.subplots(1, 1, figsize=(3.5, 2.5))
+    fig.patch.set_alpha(0.0)
+    ax.set_facecolor("none")
+
+    # plot order fixed (legend order stable)
+    ax.plot(n_list, errors_dict["LFSR"], 'h--',
+            markerfacecolor="none", color=COLOR_LFSR,
+            linewidth=LINEWIDTH, markersize=MARKERSIZE,
+            label="LFSR")
+
+    ax.plot(n_list, errors_dict["Random"], 'o--',
+            markerfacecolor="none", color=COLOR_RANDOM,
+            linewidth=LINEWIDTH, markersize=MARKERSIZE,
+            label="Random")
+
+    ax.plot(n_list, errors_dict["Halton"], 'd-.',
+            markerfacecolor="none", color=COLOR_HALTON,
+            linewidth=LINEWIDTH, markersize=MARKERSIZE,
+            label="Halton")
+
+    ax.plot(n_list, errors_dict["Sobol"], 's--',
+            markerfacecolor="none", color=COLOR_SOBOL,
+            linewidth=LINEWIDTH, markersize=MARKERSIZE,
+            label="Sobol")
+
+    ax.plot(n_list, errors_dict["DUS"], '^-',
+            markerfacecolor="none", color=COLOR_DUS,
+            linewidth=LINEWIDTH, markersize=MARKERSIZE,
+            label="DUS (Proposed)")
+
+    # ====== axis settings ======
+    ax.set_xlabel("Operand Precision $n$ [bits]", fontname=FONT, fontweight="bold")
+    ax.set_ylabel("B2S Error", fontname=FONT, fontweight="bold")
+
+    ax.set_yscale("linear")
+
+    ax.set_xticks(n_list)
+    ax.set_xticklabels([str(n) for n in n_list])
+
+    ax.set_ylim(-0.01, 0.1)
+
+    ax.tick_params(axis='both', which='both',
+                   direction='in',
+                   length=TICK_LENGTH,
+                   width=TICK_WIDTH)
+
+    for spine in ax.spines.values():
+        spine.set_linewidth(BORDER_WIDTH)
+
+    for label in ax.get_xticklabels() + ax.get_yticklabels():
+        label.set_fontname(FONT)
+        label.set_fontweight("bold")
+
+    leg = ax.legend(loc="upper right", frameon=False)
+    for text in leg.get_texts():
+        text.set_fontname(FONT)
+        text.set_fontweight("bold")
+
+    fig.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.show()
+
+
+def main():
+    length_list = [16, 32, 64, 128, 256, 512, 1024]
+    methods = ['Random', 'LFSR', 'Halton', 'Sobol', 'DUS']
+    errors_dict = {m: [] for m in methods}
+
+    simulations = 10000
+
+    for lengthN in length_list:
+        res = simulate_b2s_avg(simulations=simulations, lengthN=lengthN)
+        for m in methods:
+            errors_dict[m].append(res[m])
+        print(f"lengthN={lengthN}  " + "  ".join([f"{m}={res[m]:.6f}" for m in methods]))
+
+    plot_b2s_errors(errors_dict, save_path="B2S_error.pdf")
 
 
 if __name__ == "__main__":

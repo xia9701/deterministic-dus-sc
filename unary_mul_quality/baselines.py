@@ -1,166 +1,103 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Created on Sat Dec 13 13:30:33 2025
-
-@author: xia
-"""
-
-# baselines.py
-# Random, LFSR, Halton, Sobol, uMUL baselines (code-faithful to your script).
-
-from __future__ import annotations
-
-import random
-from typing import List, Tuple
 
 import numpy as np
 from scipy.stats.qmc import Halton, Sobol
 
-from utils import generate_random_8bit_nonzero, normalize_8bit_to_threshold_space
 
-
-# -------------------------
-# Random baseline (per-bit fresh random 8-bit threshold)
-# -------------------------
-
-def binary_to_random_bitstream(binary_str: str, lengthN: int) -> str:
-    """
-    EXACTLY matches your original baseline:
-    for each unary bit, generate a fresh random 8-bit threshold and compare.
-    """
-    out = []
-    x = int(binary_str, 2)
-    for _ in range(lengthN):
-        thr = int(generate_random_8bit_nonzero(), 2)
-        out.append("1" if x > thr else "0")
-    return "".join(out)
-
-
-# -------------------------
-# Halton / Sobol baselines (threshold arrays)
-# -------------------------
-
-def make_halton_thresholds(lengthN: int) -> Tuple[List[int], List[int]]:
-    """
-    Matches your per-trial behavior: instantiate engine and call random twice.
-    """
-    halton_engine = Halton(d=2, scramble=False)
-    s1 = halton_engine.random(n=lengthN)
-    s2 = halton_engine.random(n=lengthN)
-    H1 = (s1[:, 0] * lengthN).astype(int).tolist()
-    H2 = (s2[:, 1] * lengthN).astype(int).tolist()
-    return H1, H2
-
-
-def make_sobol_thresholds(lengthN: int) -> Tuple[List[int], List[int]]:
-    """
-    Matches your per-trial behavior: instantiate engine and call random twice.
-    """
-    sobol_engine = Sobol(d=2, scramble=False)
-    s1 = sobol_engine.random(n=lengthN)
-    s2 = sobol_engine.random(n=lengthN)
-    S1 = (s1[:, 0] * lengthN).astype(int).tolist()
-    S2 = (s2[:, 1] * lengthN).astype(int).tolist()
-    return S1, S2
-
-
-def stream_from_thresholds(binary_str: str, thresholds: List[int], lengthN: int) -> str:
-    """
-    Same comparator rule as your generate_255bit_stream_N3.
-    """
-    nv = normalize_8bit_to_threshold_space(binary_str, lengthN)
-    return "".join("1" if nv > t else "0" for t in thresholds)
-
-
-# -------------------------
-# uMUL masked generation (sequential A consumption)
-# -------------------------
-
-def umul_masked_stream_sequentialA(binary_str: str,
-                                  thresholds_A: List[int],
-                                  mask_stream: str,
-                                  lengthN: int) -> str:
-    """
-    EXACTLY matches generate_255bit_stream_N3_UGMEE_sequentialA:
-    - Only consume thresholds_A when mask_stream[i] == '1'
-    - Otherwise output 0
-    """
-    nv = normalize_8bit_to_threshold_space(binary_str, lengthN)
-    out = []
-    A_index = 0
-    for i in range(lengthN):
-        if mask_stream[i] == "1":
-            out.append("1" if nv > thresholds_A[A_index] else "0")
-            A_index += 1
+def generate_255bit_stream_N3(binary_str, A, lengthN):
+    """Generate a bitstream by thresholding sequence A (0..lengthN-1)."""
+    normalized_value = int(binary_str, 2) / 255 * (lengthN - 1)
+    random_bitstream = ''
+    for num in A:
+        if normalized_value > num:
+            random_bitstream += '1'
         else:
-            out.append("0")
-    return "".join(out)
+            random_bitstream += '0'
+    return random_bitstream
 
 
-# -------------------------
-# LFSR baseline (threshold arrays)
-# -------------------------
+# ============================================================
+# LFSR baseline (m-bit LFSR, r_t in [1, 2^m-1], compare r < x_m)
+# ============================================================
+def get_lfsr_taps(bit_width):
+    primitive_polynomials = {
+        4: [4, 3],
+        5: [5, 3],
+        6: [6, 5],
+        7: [7, 6],
+        8: [8, 6, 5, 4],
+        9: [9, 5],
+        10: [10, 7],
+        11: [11, 9],
+        12: [12, 11, 10, 4],
+        13: [13, 12, 11, 8],
+        14: [14, 13, 12, 2],
+        15: [15, 14],
+        16: [16, 14, 13, 11],
+    }
+    return primitive_polynomials.get(bit_width, [bit_width, bit_width - 1])
 
-BIT_WIDTH_LFSR = 12
-LFSR_MASK = (1 << BIT_WIDTH_LFSR) - 1  
 
-LFSR_TAPS_A = [10, 7] 
-LFSR_TAPS_B = [10, 3] 
-
-
-def generate_master_lfsr_sequence(taps: List[int], seed: int) -> List[int]:
+def generate_lfsr_sequence_mbit(seed, bit_width, lengthN):
     """
-    Matches your original generate_master_lfsr_sequence.
+    Generate m-bit LFSR random sequence r_t ∈ [1, 2^m - 1]
     """
-    sr = seed & LFSR_MASK
+    taps = get_lfsr_taps(bit_width)
+    sr = seed & ((1 << bit_width) - 1)
     if sr == 0:
         sr = 1
 
     seq = []
-    visited = set()
-    while sr not in visited:
-        visited.add(sr)
-        seq.append(sr)
-
-        bit = 0
+    for _ in range(lengthN):
+        fb = 0
         for t in taps:
-            bit ^= (sr >> (t - 1)) & 1
-        sr = ((sr << 1) & LFSR_MASK) | bit
-
+            fb ^= (sr >> (t - 1)) & 1
+        sr = ((sr << 1) & ((1 << bit_width) - 1)) | fb
+        seq.append(sr)
     return seq
 
 
-MASTER_LFSR_A_SEQ = generate_master_lfsr_sequence(LFSR_TAPS_A, seed=0b1010010101)
-MASTER_LFSR_B_SEQ = generate_master_lfsr_sequence(LFSR_TAPS_B, seed=0b1100100110)
-
-
-def get_lfsr_thresholds_for_N(lengthN: int, seq: List[int]) -> List[int]:
+def generate_bitstream_LFSR_mbit_from8(binary_str_8bit, r_seq, bit_width):
     """
-    Matches your original mapping:
-      a_val = (sr * lengthN) // 2^BIT_WIDTH_LFSR
-      clamp to [0, lengthN-1]
+    LFSR bitstream generation (r < x),
+    x is 8-bit (0..255), mapped to m-bit domain first.
     """
-    period = len(seq)
-    out = []
-    for i in range(lengthN):
-        sr = seq[i % period]
-        a_val = (sr * lengthN) // (1 << BIT_WIDTH_LFSR)
-        if a_val >= lengthN:
-            a_val = lengthN - 1
-        out.append(a_val)
-    return out
+    x8 = int(binary_str_8bit, 2)  # 0..255
+    x_m = int(round(x8 / 255.0 * ((1 << bit_width) - 1)))  # 0..(2^m-1)
+    return ''.join('1' if r < x_m else '0' for r in r_seq)
 
 
-def make_lfsr_thresholds(lengthN: int) -> Tuple[List[int], List[int]]:
-    A = get_lfsr_thresholds_for_N(lengthN, MASTER_LFSR_A_SEQ)
-    B = get_lfsr_thresholds_for_N(lengthN, MASTER_LFSR_B_SEQ)
-    return A, B
-
-
-def lfsr_stream(binary_str: str, thresholds: List[int], lengthN: int) -> str:
+# ============================================================
+# QMC thresholds (Halton/Sobol) — keep EXACT same calling style
+# ============================================================
+def gen_halton_thresholds_pair(lengthN):
     """
-    Matches generate_255bit_stream_LFSR (same '>' comparator).
+    Match original script behavior:
+      halton_engine = Halton(d=2, scramble=False)
+      halton_samples_all  = engine.random(n=lengthN)
+      halton_samples_all2 = engine.random(n=lengthN)
+      H1 from [:,0], H2 from [:,1] of the SECOND draw
     """
-    nv = normalize_8bit_to_threshold_space(binary_str, lengthN)
-    return "".join("1" if nv > t else "0" for t in thresholds)
+    halton_engine = Halton(d=2, scramble=False)
+    halton_samples_all = halton_engine.random(n=lengthN)
+    halton_samples_all2 = halton_engine.random(n=lengthN)
+    H1 = (halton_samples_all[:, 0] * lengthN).astype(int).tolist()
+    H2 = (halton_samples_all2[:, 1] * lengthN).astype(int).tolist()
+    return H1, H2
+
+
+def gen_sobol_thresholds_pair(lengthN):
+    """
+    Match original script behavior:
+      sobol_engine = Sobol(d=2, scramble=False)
+      sobol_samples  = engine.random(n=lengthN)
+      sobol_samples2 = engine.random(n=lengthN)
+      S1 from [:,0], S2 from [:,1] of the SECOND draw
+    """
+    sobol_engine = Sobol(d=2, scramble=False)
+    sobol_samples = sobol_engine.random(n=lengthN)
+    sobol_samples2 = sobol_engine.random(n=lengthN)
+    S1 = (sobol_samples[:, 0] * lengthN).astype(int).tolist()
+    S2 = (sobol_samples2[:, 1] * lengthN).astype(int).tolist()
+    return S1, S2

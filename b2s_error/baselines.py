@@ -1,97 +1,69 @@
-# baselines.py
-# Random / LFSR / Halton / Sobol / uMUL baselines.
-
-from __future__ import annotations
-
-import math
-from typing import Dict, List, Tuple
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 import numpy as np
 from scipy.stats.qmc import Halton, Sobol
 
-from utils import generate_random_nbit_nonzero, normalize_to_threshold_space
 
-
-# -------------------------
-# Random baseline (per-bit fresh random n-bit threshold)
-# -------------------------
-
-def random_bitstream(binary_str: str, lengthN: int, bit_width: int) -> str:
+# =========================
+# Random / Threshold-based streams
+# =========================
+def binary_to_random_bitstream(binary_str, lengthN, bit_width: int):
     """
-    For each unary bit, generate a fresh random n-bit threshold and compare.
+    Random baseline:
+    For each bit, generate a fresh random n-bit threshold and compare.
     """
-    x = int(binary_str, 2)
-    out = []
+    from utils import generate_random_nbit
+    random_bitstream = ''
     for _ in range(lengthN):
-        thr = int(generate_random_nbit_nonzero(bit_width), 2)
-        out.append("1" if x > thr else "0")
-    return "".join(out)
+        random_nbit_str = generate_random_nbit(bit_width)
+        random_bitstream += '1' if int(binary_str, 2) > int(random_nbit_str, 2) else '0'
+    return random_bitstream
 
 
-# -------------------------
-# Halton / Sobol threshold arrays
-# -------------------------
-
-def halton_thresholds(lengthN: int) -> Tuple[List[int], List[int]]:
+def generate_threshold_stream(binary_str, A, lengthN, max_int_for_bits: int):
     """
-      halton_engine = Halton(d=2, scramble=False)
-      engine.random(n=N) twice
+    Threshold stream:
+      normalized_value = x / MAX_INT_FOR_BITS * (lengthN - 1)
+      out[i] = 1 if normalized_value > A[i] else 0
     """
-    engine = Halton(d=2, scramble=False)
-    s1 = engine.random(n=lengthN)
-    s2 = engine.random(n=lengthN)
-    H1 = (s1[:, 0] * lengthN).astype(int).tolist()
-    H2 = (s2[:, 1] * lengthN).astype(int).tolist()
+    normalized_value = int(binary_str, 2) / max_int_for_bits * (lengthN - 1)
+    return ''.join('1' if normalized_value > num else '0' for num in A)
+
+
+# =========================
+# QMC sequences (Halton / Sobol)
+# =========================
+def gen_halton_thresholds_pair(lengthN: int):
+    """
+      Create a new Halton engine for EACH simulation.
+      Draw twice and use H1 from [:,0] of first draw, H2 from [:,1] of second draw.
+    """
+    halton_engine = Halton(d=2, scramble=False)
+    halton_samples_all = halton_engine.random(n=lengthN)
+    halton_samples_all2 = halton_engine.random(n=lengthN)
+    H1 = (halton_samples_all[:, 0] * lengthN).astype(int).tolist()
+    H2 = (halton_samples_all2[:, 1] * lengthN).astype(int).tolist()
     return H1, H2
 
 
-def sobol_thresholds(lengthN: int) -> Tuple[List[int], List[int]]:
+def gen_sobol_thresholds_pair(lengthN: int):
     """
-      sobol_engine = Sobol(d=2, scramble=False)
-      engine.random(n=N) twice
+      Create a new Sobol engine for EACH simulation.
+      Draw twice and use S1 from [:,0] of first draw, S2 from [:,1] of second draw.
     """
-    engine = Sobol(d=2, scramble=False)
-    s1 = engine.random(n=lengthN)
-    s2 = engine.random(n=lengthN)
-    S1 = (s1[:, 0] * lengthN).astype(int).tolist()
-    S2 = (s2[:, 1] * lengthN).astype(int).tolist()
+    sobol_engine = Sobol(d=2, scramble=False)
+    sobol_samples = sobol_engine.random(n=lengthN)
+    sobol_samples2 = sobol_engine.random(n=lengthN)
+    S1 = (sobol_samples[:, 0] * lengthN).astype(int).tolist()
+    S2 = (sobol_samples2[:, 1] * lengthN).astype(int).tolist()
     return S1, S2
 
 
-def stream_from_thresholds(binary_str: str, thresholds: List[int], lengthN: int, max_int: int) -> str:
-    nv = normalize_to_threshold_space(binary_str, max_int, lengthN)
-    return "".join("1" if nv > t else "0" for t in thresholds)
-
-
-# -------------------------
-# uMUL masked stream (sequential threshold consumption)
-# -------------------------
-
-def umul_stream_sequentialA(binary_str: str,
-                            thresholds_A: List[int],
-                            mask_stream: str,
-                            lengthN: int,
-                            max_int: int) -> str:
-    """
-    Only consume thresholds_A when mask_stream[i] == '1'; else output '0'.
-    """
-    nv = normalize_to_threshold_space(binary_str, max_int, lengthN)
-    out = []
-    idx = 0
-    for i in range(lengthN):
-        if mask_stream[i] == "1":
-            out.append("1" if nv > thresholds_A[idx] else "0")
-            idx += 1
-        else:
-            out.append("0")
-    return "".join(out)
-
-
-# -------------------------
-# LFSR baseline (auto taps + sr % N mapping)
-# -------------------------
-
-def get_lfsr_taps(bit_width: int) -> List[int]:
+# =========================
+# LFSR
+# =========================
+def get_lfsr_taps(bit_width):
     primitive_polynomials = {
         4: [4, 3],
         5: [5, 3],
@@ -110,30 +82,27 @@ def get_lfsr_taps(bit_width: int) -> List[int]:
     return primitive_polynomials.get(bit_width, [bit_width, bit_width - 1])
 
 
-def lfsr_thresholds_auto(seed: int, lengthN: int) -> List[int]:
-    """
-      bit_width = max(4, ceil(log2(N+1)))
-      taps = get_lfsr_taps(bit_width)
-      update sr then output sr % N
-    """
-    bit_width = max(4, math.ceil(math.log2(lengthN + 1)))
-    taps = get_lfsr_taps(bit_width)
-    mask = (1 << bit_width) - 1
+def generate_lfsr_sequence_mbit(seed, bit_width, lengthN):
 
-    sr = seed & mask
+    taps = get_lfsr_taps(bit_width)
+    sr = seed & ((1 << bit_width) - 1)
     if sr == 0:
         sr = 1
 
-    out = []
+    seq = []
     for _ in range(lengthN):
-        bit = 0
+        fb = 0
         for t in taps:
-            bit ^= (sr >> (t - 1)) & 1
-        sr = ((sr << 1) & mask) | bit
-        out.append(sr % lengthN)
-    return out
+            fb ^= (sr >> (t - 1)) & 1
+        sr = ((sr << 1) & ((1 << bit_width) - 1)) | fb
+        seq.append(sr)
+    return seq
 
 
-def lfsr_bitstream(binary_str: str, thresholds: List[int], lengthN: int, max_int: int) -> str:
-    nv = normalize_to_threshold_space(binary_str, max_int, lengthN)
-    return "".join("1" if nv > t else "0" for t in thresholds)
+def generate_bitstream_LFSR_mbit(binary_str, r_seq):
+    """
+    LFSR bitstream:
+      out[i] = 1 if r_seq[i] < x_int else 0
+    """
+    x_int = int(binary_str, 2)
+    return ''.join('1' if r < x_int else '0' for r in r_seq)

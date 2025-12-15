@@ -1,46 +1,55 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Created on Sat Dec 13 13:23:50 2025
-
-@author: xia
-"""
-
-# utils.py
-# Common utilities for unary bitstream evaluation.
-
-from __future__ import annotations
 
 import random
-from typing import List
+import math
+import numpy as np
 
 
-def generate_random_bit() -> str:
-    """Generate a random bit ('0' or '1') with equal probability."""
-    return random.choice(["0", "1"])
+def set_spine_linewidth(ax, linewidth=2):
+    ax.spines['top'].set_linewidth(linewidth)
+    ax.spines['right'].set_linewidth(linewidth)
+    ax.spines['left'].set_linewidth(linewidth)
+    ax.spines['bottom'].set_linewidth(linewidth)
 
 
-def generate_random_8bit_nonzero() -> str:
-    """Generate an 8-bit random binary string, excluding all zeros."""
+def generate_random_bit():
+    """Generate a random bit, '1' or '0', with equal probability."""
+    return random.choice(['0', '1'])
+
+
+def generate_random_8bit():
+    """Generate an 8-bit random binary number, excluding all zeros."""
     while True:
-        s = "".join(generate_random_bit() for _ in range(8))
-        if s != "00000000":
-            return s
+        binary_str = ''.join(generate_random_bit() for _ in range(8))
+        if not all(bit == '0' for bit in binary_str):
+            return binary_str
 
 
-def binary_to_decimal(binary_str: str) -> int:
+def binary_to_decimal(binary_str):
     return int(binary_str, 2)
 
 
-def normalize_8bit_to_threshold_space(binary_str: str, lengthN: int) -> float:
-    """
-    normalized_value = (x / 255) * (lengthN - 1)
-    """
-    x = int(binary_str, 2)
-    return (x / 255.0) * (lengthN - 1)
+def binary_to_random_bitstream(binary_str, lengthN):
+    """Generate a random bitstream and compare with binary input."""
+    random_bitstream = ''
+    for _ in range(lengthN):
+        random_8bit_str = generate_random_8bit()
+        if int(binary_str, 2) > int(random_8bit_str, 2):
+            random_bitstream += '1'
+        else:
+            random_bitstream += '0'
+    return random_bitstream
 
 
-def print_table(title: str, table: dict, lengthN_list: List[int], methods: List[str]) -> None:
+def bits_from_lengthN(lengthN: int) -> int:
+    """Return log2(lengthN), lengthN must be a power of 2."""
+    if lengthN <= 1 or (lengthN & (lengthN - 1)) != 0:
+        raise ValueError(f"lengthN={lengthN} is not a power of 2")
+    return int(math.log2(lengthN))
+
+
+def print_table(title, table, lengthN_list, methods):
     print("\n==============================")
     print(f"=== {title} ===")
     print("==============================")

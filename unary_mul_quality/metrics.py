@@ -1,32 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Created on Sat Dec 13 13:24:25 2025
 
-@author: xia
-"""
-
-# metrics.py
-# Metrics: SCC, ZCE, unary multiplication MAE (AND), etc.
-
-from __future__ import annotations
-
-from typing import Tuple
+import random
 
 
-def _count_abcd(X: str, Y: str) -> Tuple[int, int, int, int]:
+def compute_scc(X, Y):
     assert len(X) == len(Y)
-    a = sum(1 for x, y in zip(X, Y) if x == "1" and y == "1")
-    b = sum(1 for x, y in zip(X, Y) if x == "1" and y == "0")
-    c = sum(1 for x, y in zip(X, Y) if x == "0" and y == "1")
-    d = sum(1 for x, y in zip(X, Y) if x == "0" and y == "0")
-    return a, b, c, d
-
-
-def compute_scc(X: str, Y: str) -> float:
-
     L = len(X)
-    a, b, c, d = _count_abcd(X, Y)
+    a = sum(1 for x, y in zip(X, Y) if x == '1' and y == '1')
+    b = sum(1 for x, y in zip(X, Y) if x == '1' and y == '0')
+    c = sum(1 for x, y in zip(X, Y) if x == '0' and y == '1')
+    d = sum(1 for x, y in zip(X, Y) if x == '0' and y == '0')
 
     numerator = a * d - b * c
     if a * d > b * c:
@@ -39,10 +23,13 @@ def compute_scc(X: str, Y: str) -> float:
     return abs(numerator / denominator)
 
 
-def compute_zce(X: str, Y: str) -> float:
-
+def compute_zce(X, Y):
+    assert len(X) == len(Y)
     L = len(X)
-    a, b, c, _d = _count_abcd(X, Y)
+
+    a = sum(1 for x, y in zip(X, Y) if x == '1' and y == '1')
+    b = sum(1 for x, y in zip(X, Y) if x == '1' and y == '0')
+    c = sum(1 for x, y in zip(X, Y) if x == '0' and y == '1')
 
     P_X = (a + b) / L
     P_Y = (a + c) / L
@@ -60,15 +47,41 @@ def compute_zce(X: str, Y: str) -> float:
     return zce
 
 
-def bitwise_and_mul(S1: str, S2: str) -> str:
-    """Unary multiplication by bitwise AND (unipolar, uncorrelated assumption)."""
-    assert len(S1) == len(S2)
-    return "".join("1" if (S1[i] == "1" and S2[i] == "1") else "0" for i in range(len(S1)))
+def F_mul(S1, S2):
+    """Perform bitwise AND on two bitstreams."""
+    return ''.join('1' if S1[i] == '1' and S2[i] == '1' else '0' for i in range(len(S1)))
 
 
-def compute_stream_mul_error(streamA: str, streamB: str, ref_val: float, lengthN: int) -> float:
+def compute_stream_mul_error(streamA, streamB, ref_val, lengthN):
     """
-    error = |ref - (#ones / (lengthN - 1))|
+      y_hat = ones/(lengthN-1)
     """
-    result = bitwise_and_mul(streamA, streamB)
-    return abs(ref_val - (result.count("1") / (lengthN - 1)))
+    result = F_mul(streamA, streamB)
+    error = abs(ref_val - result.count('1') / (lengthN - 1))
+    return error
+
+
+# =========================
+# Scaled add (MUX) + MAE
+# =========================
+def F_add_mux(SA, SB, Ssel):
+    """Scaled add via MUX: if Ssel[i]=='1' pick SA[i], else pick SB[i]."""
+    assert len(SA) == len(SB) == len(Ssel)
+    return ''.join(SA[i] if Ssel[i] == '1' else SB[i] for i in range(len(SA)))
+
+
+def compute_stream_add_error_scaled(streamA, streamB, sel_stream, ref_add, lengthN):
+    """
+    Scaled add MAE:
+      out = MUX(sel, A, B)
+      y_hat = ones(out)/(lengthN-1)   # keep denominator consistent with MUL
+      err = |ref_add - y_hat|
+    """
+    out = F_add_mux(streamA, streamB, sel_stream)
+    y_hat = out.count('1') / (lengthN - 1)
+    return abs(ref_add - y_hat)
+
+
+def fresh_unbiased_sel_stream(lengthN):
+    """Fresh unbiased MUX select stream per simulation."""
+    return ''.join(random.choice(['0', '1']) for _ in range(lengthN))

@@ -3,6 +3,12 @@
 This folder evaluates binary-to-stochastic (B2S) conversion error across bitstream
 lengths N in {16, 32, 64, 128, 256, 512, 1024}. It compares deterministic unary
 sequences (DUS: ADUS/SDUS) against common baselines.
+Methods:
+- Random (fresh n-bit thresholding per bit)
+- LFSR (m-bit LFSR, compare `r < x`)
+- Halton (2D, scramble=False)
+- Sobol (2D, scramble=False)
+- DUS (ADUS + proposed DUS permutation)
 
 ## What this experiment measures
 For each N, the script runs Monte Carlo trials with random n-bit inputs where:

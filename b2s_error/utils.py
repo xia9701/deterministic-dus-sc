@@ -1,37 +1,26 @@
-# utils.py
-# Utilities for B2S error sweep (power-of-two N, random n-bit input strings).
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
-from __future__ import annotations
-
-import math
 import random
+import math
 
 
 def bits_from_lengthN(lengthN: int) -> int:
-    """Return BIT_WIDTH = log2(lengthN). Require lengthN is power of two."""
     if lengthN <= 1 or (lengthN & (lengthN - 1)) != 0:
-        raise ValueError(f"lengthN={lengthN} is not a power of two.")
+        raise ValueError(f"lengthN={lengthN} not right")
     return int(math.log2(lengthN))
 
 
-def generate_random_bit() -> str:
-    return random.choice(["0", "1"])
+def generate_random_bit():
+    return random.choice(['0', '1'])
 
 
-def generate_random_nbit_nonzero(bit_width: int) -> str:
-    """Generate a random bit_width-bit binary string, excluding all zeros."""
+def generate_random_nbit(bit_width: int):
     while True:
-        s = "".join(generate_random_bit() for _ in range(bit_width))
-        if any(ch == "1" for ch in s):
-            return s
+        binary_str = ''.join(generate_random_bit() for _ in range(bit_width))
+        if any(bit == '1' for bit in binary_str):
+            return binary_str
 
 
-def binary_to_decimal(binary_str: str) -> int:
+def binary_to_decimal(binary_str):
     return int(binary_str, 2)
-
-
-def normalize_to_threshold_space(binary_str: str, max_int: int, lengthN: int) -> float:
-    """
-      normalized_value = int(binary_str,2) / MAX_INT_FOR_BITS * (lengthN - 1)
-    """
-    return (int(binary_str, 2) / float(max_int)) * (lengthN - 1)
